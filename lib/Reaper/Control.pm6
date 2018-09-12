@@ -74,11 +74,13 @@ our class Listener {
     }
 
     #! Setup a pipeline decoding from a UDP socket
-    method listen-udp(Str :$host, :$port) {
+    method listen-udp(Str :$host, Int :$port) {
         $!listener.close if defined $!listener;
         $!listener .= bind-udp($host, $port);
         self.init-unbundle;
         self.init-message-mapper;
+
+        self
     }
 
     #! initialise an OSC bundler parser on the current pipeline
@@ -97,8 +99,8 @@ our class Listener {
         $!message-mapper.close if defined $!message-mapper;
 
         # Instatiate imutable objects
-        my $play = ReaperEvent::Play.new;
-        my $stop = ReaperEvent::Stop.new;
+        my $play = Event::Play.new;
+        my $stop = Event::Stop.new;
 
         $!message-mapper = $!bundles.Supply.tap: {
             my Bool $is-playing;

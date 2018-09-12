@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/samgwise/Reaper-control.svg?branch=master)](https://travis-ci.org/samgwise/Reaper-control)
+
 NAME
 ====
 

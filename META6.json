@@ -14,7 +14,7 @@
     "Reaper::Control" : "lib/Reaper/Control.pm6"
   },
   "resources" : [ ],
-  "source-url" : "",
+  "source-url" : "https://github.com/samgwise/Reaper-control.git",
   "tags" : [ ],
   "test-depends" : [ ],
   "version" : null
