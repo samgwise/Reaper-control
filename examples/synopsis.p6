@@ -15,4 +15,10 @@ react whenever $listener.reaper-events {
     when Reaper::Control::Event::PlayTime {
         put "seconds: { .seconds }\nsamples: { .samples }\nbeats: { .beats }"
     }
+    when Reaper::Control::Event::Mixer {
+        put "levels: ", join ',', .master.vu, .tracks.map( *.vu ).Slip
+    }
+    when Reaper::Control::Event::Unhandled {
+        .perl.say
+    }
 }

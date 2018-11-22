@@ -1,5 +1,5 @@
 use v6.c;
-unit module Reaper::Control:ver<0.0.1>;
+unit module Reaper::Control:ver<0.0.2>;
 
 
 =begin pod
@@ -17,15 +17,21 @@ Reaper::Control - An OSC controller interface for Reaper
 
   # Respond to events from Reaper:
   react whenever $listener.reaper-events {
-    when Reaper::Control::Event::Play {
-        put 'Playing'
-    }
-    when Reaper::Control::Event::Stop {
-        put 'stopped'
-    }
-    when Reaper::Control::Event::PlayTime {
-        put "seconds: { .seconds }\nsamples: { .samples }\nbeats: { .beats }"
-    }
+      when Reaper::Control::Event::Play {
+          put 'Playing'
+      }
+      when Reaper::Control::Event::Stop {
+          put 'stopped'
+      }
+      when Reaper::Control::Event::PlayTime {
+          put "seconds: { .seconds }\nsamples: { .samples }\nbeats: { .beats }"
+      }
+      when Reaper::Control::Event::Mixer {
+          put "levels: ", join ',', .master.vu, .tracks.map( *.vu ).Slip
+      }
+      when Reaper::Control::Event::Unhandled {
+          .perl.say
+      }
   }
 =head1 DESCRIPTION
 
@@ -95,12 +101,42 @@ our class Event::PlayTime is Event {
     has Str $.beats;
 }
 
+#! holds values for a Mixer
+our class Event::Level is Event {
+    #= This message bundles up audio level information
+    has Rat $.vu is rw;
+    has Rat $.vu-l is rw;
+    has Rat $.vu-r is rw;
+}
+
+#! Holds levels for tracks and master
+our class Event::Mixer is Event {
+    #= This message bundles up audio level information
+    has Event::Level $.master = Event::Level.new;
+    has Event::Level @.tracks;
+
+    #! runa quick audit and return ourself
+    method audit {
+        for @!tracks {
+            $_ .= new unless .defined
+        }
+        self
+    }
+}
+
+#! Holds unhandled messages
+our class Event::Unhandled is Event {
+    #= This message bundles up audio level information
+    has %.messages
+}
+
 #! A listener which wraps up the parsing logic to handle events from Reaper
 our class Listener {
     #= This class bundles up a series of tapped supplies which define a listener workflow.
     #= To construct a new listener call the listener-udp method to initialise a UDP listener workflow.
 
     use Net::OSC::Bundle;
+    use Net::OSC::Message;
 
     has Supplier            $!bundles = Supplier.new;
     has Supplier            $!reaper  = Supplier.new;
@@ -133,8 +169,9 @@ our class Listener {
         $!unbundler.close if defined $!unbundler;
         $!unbundler = $!listener.Supply(:bin).grep( *.elems > 0 ).tap: -> $buf {
             try {
-                CATCH { warn "Error unpacking OSC bundle:\n{ .gist }" }
-                $!bundles.emit: Net::OSC::Bundle.unpackage($buf)
+                CATCH { warn "Error unpacking OSC packet:\n{ .gist }" }
+                $!bundles.emit: Net::OSC::Bundle.unpackage($buf) if $buf[0] == 0x23; # eg does it start with '#' (a bundle)
+                $!bundles.emit: Net::OSC::Bundle.new( :messages(Net::OSC::Message.unpackage($buf)) ) if $buf[0] == 0x2F; # eg does it start with '/' (a message)
             }
         }
     }
@@ -148,10 +185,12 @@ our class Listener {
         my $stop = Event::Stop.new;
 
         $!message-mapper = $!bundles.Supply.tap: {
-            my Bool $is-playing;
-            my Numeric $seconds;
-            my Numeric $samples;
-            my Str      $beats;
+            my Bool             $is-playing;
+            my Numeric          $seconds;
+            my Numeric          $samples;
+            my Str              $beats;
+            my Event::Mixer     $mixer;
+            my Event::Unhandled $unhandled;
 
             for .messages {
                 when .path eq '/time' {
@@ -172,11 +211,53 @@ our class Listener {
                 when .path ~~ / '/str' $/ {
                     #ignore strings for now
                 }
-                default { warn "Unhandled message: { .gist }" }
+                # VU level messages
+                when .path ~~ / '/' $<track> = [<alnum>+] $<channel> = ['/'? \d*] '/vu' $<lr> = ['/L'|'/R'?]/ {
+                    $mixer .= new unless $mixer.defined;
+                    my Event::Level $topic = do
+                        if ~$<track> eq 'master' {
+                            $mixer.master
+                        }
+                        else {
+                            # assuming track
+                            my $index = do
+                                with ~$<channel> -> $c {
+                                    try {
+                                            CATCH {warn "Error converting channel number $c to Int"; next}
+                                        $c.substr(1).Int if $c.chars > 0
+                                    }
+                                }
+                                else {
+                                    0
+                                }
+                            $mixer.tracks[$index] .= new if !$mixer.tracks or $mixer.tracks.end < $index or !$mixer.tracks[$index].defined;
+
+                            $mixer.tracks[$index]
+                        }
+
+                    given ~$<lr> -> $channel {
+                        when $channel ~~ '/L' {
+                            $topic.vu-l = .args[0]
+                        }
+                        when $channel ~~ '/R' {
+                            $topic.vu-r = .args[0]
+                        }
+                        default {
+                            $topic.vu = .args[0]
+                        }
+                    }
+                }
+                default {
+                    # Rebundle unhandled messages and pass them on
+                    $unhandled .= new unless $unhandled.defined;
+                    $unhandled.messages{.path} = .args
+                }
             }
 
             $!reaper.emit: $is-playing ?? $play !! $stop if defined $is-playing;
             $!reaper.emit: Event::PlayTime.new(:$seconds :$samples :$beats) if $seconds and $samples and $beats;
+            $!reaper.emit: $mixer.audit if $mixer.defined;
+            $!reaper.emit: $unhandled if $unhandled.defined;
         }
     }
 }
