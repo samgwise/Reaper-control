@@ -1,7 +1,6 @@
 use v6.c;
 unit module Reaper::Control:ver<0.0.2>;
 
-
 =begin pod
 
 =head1 NAME
@@ -36,7 +35,12 @@ Reaper::Control - An OSC controller interface for Reaper
 =head1 DESCRIPTION
 
 Reaper::Control is an L<OSC controller interface|https://www.reaper.fm/sdk/osc/osc.php> for L<Reaper|https://www.reaper.fm>, a digital audio workstation.
-Current features are limited and relate to play/stop and playback position but there is a lot more which can be added in the future.
+Current features are limited and relate to listening for play/stop, playback position and mixer levels but there is a lot more which can be added in the future.
+
+To start listening call the C<reaper-listener> subroutine, you can then obtain a C<Supply> of events from the listener's C<.reaper-events> method.
+All events emitted from the supply are subclasses of the C<Reaper::Control::Event> role. Messages not handled by the default message handler are emitted as C<Reaper::Control::Unhandled> objects, their contents can be accessed in the message attribute.
+
+To skip the default message handler you may instead tap the lister's C<.reaper-raw> method. This supply emits C<Net::OSC::Bundle> objects, see the Net::OSC module for more on this object.
 
 =head1 AUTHOR
 
@@ -52,11 +56,11 @@ This library is free software; you can redistribute it and/or modify it under th
 
 our class Event {
     #= Base class for all reaper events.
-    #= Otherwise a plain old empty class.
+    #= No functionality here, just an empty class.
 }
 
-our role Event::PlayState is Event {
-    #= A role defining the methods of Play and Stop Classes.
+our class Event::PlayState is Event {
+    #= An abstract class defining the methods of Play and Stop classes.
     #= Use this type if you need to accept either Play or Stop objects.
 
     method is-playing( --> Bool) { … };
@@ -64,7 +68,7 @@ our role Event::PlayState is Event {
     method is-stopped( --> Bool) { … };
 }
 
-our class Event::Play does Event::PlayState {
+our class Event::Play is Event::PlayState {
     #= The Play version of the PlayState role.
     #= This object is emitted when playback is started.
 
@@ -79,7 +83,7 @@ our class Event::Play does Event::PlayState {
     };
 }
 
-our class Event::Stop does Event::PlayState {
+our class Event::Stop is Event::PlayState {
     #= The Stop version of the PlayState role.
     #= This object is emitted when playback is stopped.
 
@@ -96,6 +100,7 @@ our class Event::Stop does Event::PlayState {
 
 our class Event::PlayTime is Event {
     #= This message bundles up elapsed seconds, elapsed samples and a string of the current beat position.
+    #=
     has Numeric $.seconds;
     has Numeric $.samples;
     has Str $.beats;
@@ -103,7 +108,8 @@ our class Event::PlayTime is Event {
 
 #! holds values for a Mixer
 our class Event::Level is Event {
-    #= This message bundles up audio level information
+    #= This message bundles up audio levels from the mixer.
+    #=
     has Rat $.vu is rw;
     has Rat $.vu-l is rw;
     has Rat $.vu-r is rw;
@@ -111,11 +117,12 @@ our class Event::Level is Event {
 
 #! Holds levels for tracks and master
 our class Event::Mixer is Event {
-    #= This message bundles up audio level information
+    #= This message bundles up audio level information from the mixer.
+    #= Master level is held in the master attribute and tracks are stored in the tracks attribute.
     has Event::Level $.master = Event::Level.new;
     has Event::Level @.tracks;
 
-    #! runa quick audit and return ourself
+    #! Ensure there are no luring undefined values from a missing message
     method audit {
         for @!tracks {
             $_ .= new unless .defined
@@ -126,7 +133,7 @@ our class Event::Mixer is Event {
 
 #! Holds unhandled messages
 our class Event::Unhandled is Event {
-    #= This message bundles up audio level information
+    #= A generic wrapper for messages not handled by the core interface
     has %.messages
 }
 
@@ -176,7 +183,7 @@ our class Listener {
         }
     }
 
-    #! Initialise an OSC Message mapper on the current pipline
+    #! Initialise an OSC Message mapper on the current pipeline
     method init-message-mapper( --> Tap) {
         $!message-mapper.close if defined $!message-mapper;
 

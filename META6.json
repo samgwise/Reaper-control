@@ -15,7 +15,13 @@
   },
   "resources" : [ ],
   "source-url" : "https://github.com/samgwise/Reaper-control.git",
-  "tags" : [ "Music", "Audio", "Reaper", "DAW", "OSC" ],
+  "tags" : [
+    "Music",
+    "Audio",
+    "Reaper",
+    "DAW",
+    "OSC"
+  ],
   "test-depends" : [ ],
   "version" : "0.0.2"
 }
